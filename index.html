@@ -4,6 +4,23 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>Wizard's Chess 3D — Gothic Cathedral Edition</title>
+  <meta name="description" content="Play 3D wizard's chess in a candlelit gothic cathedral. Marble against obsidian, every capture shatters stone. Play the AI or a friend, free in your browser." />
+  <meta name="theme-color" content="#0b090f" />
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23fcd34d'/%3E%3Cstop offset='.55' stop-color='%23f59e0b'/%3E%3Cstop offset='1' stop-color='%236d28d9'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='14' fill='%230b090f'/%3E%3Cpath fill='url(%23g)' d='M18 52h28v-6H18zM21 44h22l-3-14h4V20h-6v4h-4v-4h-4v4h-4v-4h-6v10h4z'/%3E%3C/svg%3E" />
+
+  <!-- Link previews (Open Graph / Twitter). Scrapers want an absolute og:image URL:
+       once the site has its final domain, prefix og-image.jpg with it. -->
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="Wizard's Chess — Gothic Cathedral Edition" />
+  <meta property="og:description" content="3D wizard's chess in a candlelit cathedral. Marble against obsidian, every capture shatters stone. Play the AI or a friend in your browser." />
+  <meta property="og:image" content="og-image.jpg" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="A marble and obsidian chess set on a board inside a dim gothic cathedral" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Wizard's Chess — Gothic Cathedral Edition" />
+  <meta name="twitter:description" content="3D wizard's chess in a candlelit cathedral. Play the AI or a friend in your browser." />
+  <meta name="twitter:image" content="og-image.jpg" />
 
   <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -47,6 +64,45 @@
     .font-gothic {
       font-family: 'Cinzel', serif;
     }
+
+    /* Title screen */
+    #title-screen {
+      background: radial-gradient(ellipse at 50% 45%, rgba(11, 9, 16, 0.25) 0%, rgba(7, 5, 12, 0.9) 78%);
+      transition: opacity 0.7s ease;
+    }
+    #title-screen.title-leaving {
+      opacity: 0;
+      pointer-events: none;
+    }
+    .title-glow {
+      text-shadow: 0 0 28px rgba(245, 158, 11, 0.35), 0 2px 0 rgba(0, 0, 0, 0.6);
+    }
+    .title-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      min-width: 190px;
+      padding: 12px 22px;
+      border-radius: 9999px;
+      font-weight: 700;
+      font-size: 14px;
+      letter-spacing: 0.02em;
+      color: #e6e0e9;
+      background: var(--md-surface-high);
+      border: 1px solid var(--md-outline);
+      cursor: pointer;
+      transition: transform 0.15s ease, background 0.2s ease, opacity 0.2s ease;
+    }
+    .title-btn:hover:not(:disabled) { transform: translateY(-1px); background: rgba(52, 46, 64, 0.92); }
+    .title-btn:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 3px; }
+    .title-btn:disabled { opacity: 0.45; cursor: wait; }
+    .title-btn-primary {
+      color: #1c1206;
+      background: linear-gradient(135deg, #fcd34d, #f59e0b);
+      border-color: rgba(252, 211, 77, 0.6);
+    }
+    .title-btn-primary:hover:not(:disabled) { background: linear-gradient(135deg, #fde68a, #fbbf24); }
 
     .material-symbols-outlined {
       font-variation-settings: 'FILL' 1, 'wght' 500, 'GRAD' 0, 'opsz' 20;
@@ -158,6 +214,24 @@
   <!-- Vignette & Subtle Atmospheric Overlay (Non-interactive) -->
   <div class="pointer-events-none fixed inset-0 z-10"
        style="background: radial-gradient(circle at 50% 50%, transparent 55%, rgba(7, 5, 12, 0.72) 100%);">
+  </div>
+
+  <!-- Title screen: sits over the slowly orbiting cathedral until a mode is chosen -->
+  <div id="title-screen" class="fixed inset-0 z-40 flex items-center justify-center px-4">
+    <div class="text-center max-w-xl">
+      <p class="text-[11px] sm:text-xs font-semibold uppercase tracking-[0.35em] text-purple-300/80 mb-3">Gothic Cathedral Edition</p>
+      <h2 class="font-gothic text-4xl sm:text-6xl font-extrabold tracking-wider text-amber-100 title-glow">Wizard's Chess</h2>
+      <p class="mt-4 text-sm sm:text-base text-slate-300" style="text-wrap: balance;">Marble against obsidian beneath the rose window. Every capture shatters stone.</p>
+      <div class="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3">
+        <button id="title-play-ai" class="title-btn title-btn-primary" onclick="beginGame('ai')" disabled>
+          <span class="material-symbols-outlined">smart_toy</span><span>Play vs. AI</span>
+        </button>
+        <button id="title-play-2p" class="title-btn" onclick="beginGame('2p')" disabled>
+          <span class="material-symbols-outlined">group</span><span>Two Players</span>
+        </button>
+      </div>
+      <p id="title-status" class="mt-6 text-xs text-slate-400" role="status">Summoning the cathedral…</p>
+    </div>
   </div>
 
   <!-- ===================================================================== -->
@@ -317,6 +391,13 @@
   <!-- ===================================================================== -->
   <!-- APPLICATION LOGIC: AUDIO, CHESS ENGINE, THREE.JS SCENE & ANIMATIONS   -->
   <!-- ===================================================================== -->
+  <script>
+    // Runs separately so the message still shows if the game script below fails without Three.js
+    if (typeof THREE === 'undefined') {
+      document.getElementById('title-status').textContent =
+        "The cathedral couldn't load (3D engine unavailable). Check your connection and reload.";
+    }
+  </script>
   <script>
     /*************************************************************************
      * 1. WEB AUDIO API SYNTHESIZER (Procedural Stone, Magic & Shatter SFX)
@@ -2837,6 +2918,9 @@
       lastFrameTime = now;
       const elapsed = now * 0.001;
 
+      // Slow orbit behind the title screen
+      if (titleScreenActive) camState.targetTheta += dt * 0.12;
+
       // 1. Smoothly Interpolate Orbit Camera + Dynamic Impact Camera Shake
       camState.theta += (camState.targetTheta - camState.theta) * 0.085;
       camState.phi += (camState.targetPhi - camState.phi) * 0.085;
@@ -2957,9 +3041,39 @@
     }
 
     // Start Application on Window Load
+    /*************************************************************************
+     * TITLE SCREEN
+     *************************************************************************/
+    let titleScreenActive = true;
+
+    function showTitleScreenReady() {
+      const ai = document.getElementById('title-play-ai');
+      ai.disabled = false;
+      document.getElementById('title-play-2p').disabled = false;
+      document.getElementById('title-status').textContent = 'Drag to orbit the board · Click a piece to command it';
+      ai.focus({ preventScroll: true });
+    }
+
+    function beginGame(mode) {
+      if (!titleScreenActive) return;
+      titleScreenActive = false;
+      soundFX.init(); // this click is the user gesture browsers require before audio can start
+      if (mode !== gameMode) toggleGameMode();
+      // Wrap the orbit angle so the camera takes the short way back to White's view
+      camState.theta = Math.atan2(Math.sin(camState.theta), Math.cos(camState.theta));
+      setCameraPreset('white');
+      soundFX.playAlert(true);
+
+      const screen = document.getElementById('title-screen');
+      screen.classList.add('title-leaving');
+      setTimeout(() => screen.remove(), 750);
+    }
+
     window.onload = function () {
       initThreeScene();
+      setCameraPreset('cinematic');
       animateLoop();
+      showTitleScreenReady();
     };
   </script>
 </body>

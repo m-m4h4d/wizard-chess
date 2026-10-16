@@ -871,26 +871,37 @@
       getLegalMovesForSquare(r, c) {
         const piece = this.board[r][c];
         if (!piece || piece.color !== this.turn) return [];
-        const pseudo = this.getPseudoMovesForSquare(r, c);
-        const legal = [];
+        return this.getPseudoMovesForSquare(r, c).filter(m => this.isMoveLegal(m));
+      }
 
-        for (const m of pseudo) {
-          const testBoard = this.board.map(row => row.map(cell => (cell ? { ...cell } : null)));
-          testBoard[m.fromR][m.fromC] = null;
-          if (m.isEnPassant) {
-            testBoard[m.capturedR][m.capturedC] = null;
-          }
-          if (m.isCastle) {
-            testBoard[m.fromR][m.rookToC] = testBoard[m.fromR][m.rookFromC];
-            testBoard[m.fromR][m.rookFromC] = null;
-          }
-          testBoard[m.toR][m.toC] = { ...m.piece, type: m.promotionType || m.piece.type };
+      // True if the pseudo-legal move does not leave the mover's King in check
+      isMoveLegal(m) {
+        const testBoard = this.board.map(row => row.slice());
+        testBoard[m.fromR][m.fromC] = null;
+        if (m.isEnPassant) {
+          testBoard[m.capturedR][m.capturedC] = null;
+        }
+        if (m.isCastle) {
+          testBoard[m.fromR][m.rookToC] = testBoard[m.fromR][m.rookFromC];
+          testBoard[m.fromR][m.rookFromC] = null;
+        }
+        testBoard[m.toR][m.toC] = m.piece;
+        return !this.inCheck(m.piece.color, testBoard);
+      }
 
-          if (!this.inCheck(piece.color, testBoard)) {
-            legal.push(m);
+      // Legal captures & promotions only, for the quiescence search
+      getLegalTacticalMoves(color = this.turn) {
+        const out = [];
+        for (let r = 0; r < 8; r++) {
+          for (let c = 0; c < 8; c++) {
+            const p = this.board[r][c];
+            if (!p || p.color !== color) continue;
+            for (const m of this.getPseudoMovesForSquare(r, c)) {
+              if ((m.captured || m.isPromotion) && this.isMoveLegal(m)) out.push(m);
+            }
           }
         }
-        return legal;
+        return out;
       }
 
       getAllLegalMoves(color = this.turn) {
@@ -910,7 +921,8 @@
       }
 
       // Execute a legal move on the logical board and record undo history
-      makeMove(move, promotionType = 'q') {
+      // annotate=false skips the +/# suffix, which needs a full legal-move pass; the AI search uses it
+      makeMove(move, promotionType = 'q', annotate = true) {
         const snapshot = this.cloneState();
         const movingPiece = { ...this.board[move.fromR][move.fromC] };
 
@@ -984,10 +996,9 @@
           notation = `${pChar}${capChar}${toSq}${promoChar}`;
         }
 
-        const nextMoves = this.getAllLegalMoves(this.turn);
-        const isCheckNow = this.inCheck(this.turn);
-        if (isCheckNow && nextMoves.length === 0) notation += '#';
-        else if (isCheckNow) notation += '+';
+        if (annotate && this.inCheck(this.turn)) {
+          notation += this.getAllLegalMoves(this.turn).length === 0 ? '#' : '+';
+        }
 
         const record = {
           snapshot,
@@ -1042,24 +1053,25 @@
         return score;
       }
 
-      // Alpha-Beta Minimax Search (Depth 2-3 with capture ordering)
+      // MVV-LVA: captures of big pieces by small pieces first, then promotions
+      static orderMoves(moves) {
+        const score = m =>
+          (m.captured ? PIECE_VALUES[m.captured.type] * 10 - PIECE_VALUES[m.piece.type] / 10 + 10000 : 0) +
+          (m.isPromotion ? 8000 : 0);
+        return moves.sort((a, b) => score(b) - score(a));
+      }
+
+      // Alpha-Beta Minimax Search with capture ordering and quiescence at the leaves
       findBestMove(depth = 2) {
         const color = this.turn;
-        const legalMoves = this.getAllLegalMoves(color);
+        const legalMoves = WizardChessEngine.orderMoves(this.getAllLegalMoves(color));
         if (legalMoves.length === 0) return null;
-
-        // Sort captures & promotions first for stronger pruning and dramatic Wizard battles
-        legalMoves.sort((a, b) => {
-          const scoreA = (a.captured ? PIECE_VALUES[a.captured.type] * 10 : 0) + (a.isPromotion ? 800 : 0);
-          const scoreB = (b.captured ? PIECE_VALUES[b.captured.type] * 10 : 0) + (b.isPromotion ? 800 : 0);
-          return scoreB - scoreA;
-        });
 
         let bestMove = legalMoves[0];
         let bestVal = color === 'w' ? -Infinity : Infinity;
 
         for (const m of legalMoves) {
-          this.makeMove(m, 'q');
+          this.makeMove(m, 'q', false);
           const val = this.minimax(depth - 1, -Infinity, Infinity, this.turn === 'w');
           this.undo();
 
@@ -1081,8 +1093,8 @@
       }
 
       minimax(depth, alpha, beta, maximizingPlayer) {
-        if (depth === 0) return this.evaluateBoard();
-        const moves = this.getAllLegalMoves(maximizingPlayer ? 'w' : 'b');
+        if (depth === 0) return this.quiesce(alpha, beta, maximizingPlayer, 0);
+        const moves = WizardChessEngine.orderMoves(this.getAllLegalMoves(maximizingPlayer ? 'w' : 'b'));
         if (moves.length === 0) {
           if (this.inCheck(maximizingPlayer ? 'w' : 'b')) {
             return maximizingPlayer ? -18000 - depth * 100 : 18000 + depth * 100;
@@ -1093,7 +1105,7 @@
         if (maximizingPlayer) {
           let maxEval = -Infinity;
           for (const m of moves) {
-            this.makeMove(m, 'q');
+            this.makeMove(m, 'q', false);
             const ev = this.minimax(depth - 1, alpha, beta, false);
             this.undo();
             if (ev > maxEval) maxEval = ev;
@@ -1104,7 +1116,7 @@
         } else {
           let minEval = Infinity;
           for (const m of moves) {
-            this.makeMove(m, 'q');
+            this.makeMove(m, 'q', false);
             const ev = this.minimax(depth - 1, alpha, beta, true);
             this.undo();
             if (ev < minEval) minEval = ev;
@@ -1114,9 +1126,128 @@
           return minEval;
         }
       }
+
+      // Keep searching captures past the horizon so the AI doesn't stop mid-exchange.
+      // Stand-pat: the side to move may decline all captures and keep the static score.
+      quiesce(alpha, beta, maximizingPlayer, qDepth) {
+        const standPat = this.evaluateBoard();
+        if (qDepth >= 6) return standPat;
+
+        if (maximizingPlayer) {
+          if (standPat >= beta) return standPat;
+          if (standPat > alpha) alpha = standPat;
+        } else {
+          if (standPat <= alpha) return standPat;
+          if (standPat < beta) beta = standPat;
+        }
+
+        const moves = WizardChessEngine.orderMoves(this.getLegalTacticalMoves(maximizingPlayer ? 'w' : 'b'));
+        let best = standPat;
+        for (const m of moves) {
+          this.makeMove(m, 'q', false);
+          const ev = this.quiesce(alpha, beta, !maximizingPlayer, qDepth + 1);
+          this.undo();
+          if (maximizingPlayer) {
+            if (ev > best) best = ev;
+            if (ev > alpha) alpha = ev;
+          } else {
+            if (ev < best) best = ev;
+            if (ev < beta) beta = ev;
+          }
+          if (beta <= alpha) break;
+        }
+        return best;
+      }
     }
 
     const chess = new WizardChessEngine();
+
+    /*************************************************************************
+     * AI WORKER: the search runs off the main thread so the cathedral keeps
+     * animating while the AI thinks. The worker is built from the engine's own
+     * source, so the game stays a single file. Falls back to the main thread
+     * if workers are unavailable (e.g. blocked by CSP).
+     *************************************************************************/
+    const AI_DEPTH = 3;
+    let aiWorker = null;
+    let aiWorkerFailed = false;
+    let aiRequestSeq = 0;   // bumped whenever the position changes; replies for older ids are dropped
+    let aiPending = null;   // { id, depth, onMove } while a search is running
+
+    function createAIWorker() {
+      if (aiWorkerFailed || typeof Worker === 'undefined') return null;
+      try {
+        const src = `
+          const PIECE_VALUES = ${JSON.stringify(PIECE_VALUES)};
+          const PST = ${JSON.stringify(PST)};
+          ${WizardChessEngine.toString()}
+          const engine = new WizardChessEngine();
+          self.onmessage = (e) => {
+            const { id, state, depth } = e.data;
+            Object.assign(engine, state, { history: [] });
+            const m = engine.findBestMove(depth);
+            self.postMessage({ id, move: m && { fromR: m.fromR, fromC: m.fromC, toR: m.toR, toC: m.toC } });
+          };`;
+        const url = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
+        const worker = new Worker(url);
+        URL.revokeObjectURL(url);
+        worker.onmessage = e => finishAIRequest(e.data.id, e.data.move);
+        worker.onerror = () => {
+          // Worker could not start or crashed: finish this search (and all later ones) on the main thread
+          aiWorkerFailed = true;
+          worker.terminate();
+          aiWorker = null;
+          if (aiPending) runAISearchInline(aiPending);
+        };
+        return worker;
+      } catch (err) {
+        aiWorkerFailed = true;
+        return null;
+      }
+    }
+
+    function runAISearchInline(req) {
+      setTimeout(() => {
+        if (req.id !== aiRequestSeq) return;
+        const m = chess.findBestMove(req.depth);
+        finishAIRequest(req.id, m && { fromR: m.fromR, fromC: m.fromC, toR: m.toR, toC: m.toC });
+      }, 0);
+    }
+
+    function finishAIRequest(id, coords) {
+      if (!aiPending || id !== aiPending.id || id !== aiRequestSeq) return;
+      const { onMove } = aiPending;
+      aiPending = null;
+      if (!coords) return;
+      // Map the worker's coordinates back onto a live move object from this board
+      const move = chess.getLegalMovesForSquare(coords.fromR, coords.fromC)
+        .find(m => m.toR === coords.toR && m.toC === coords.toC);
+      if (move) onMove(move);
+    }
+
+    // Ask for the best move in the current position; onMove runs only if the position is unchanged
+    function requestAIMove(onMove, depth = AI_DEPTH) {
+      cancelAIRequest();
+      const req = { id: aiRequestSeq, depth, onMove };
+      aiPending = req;
+      if (!aiWorker) aiWorker = createAIWorker();
+      if (!aiWorker) {
+        runAISearchInline(req);
+        return;
+      }
+      const s = chess.cloneState();
+      aiWorker.postMessage({ id: req.id, depth, state: { board: s.board, turn: s.turn, castling: s.castling, enPassant: s.enPassant } });
+    }
+
+    // Drop any in-flight search. A busy worker is restarted rather than left to finish a stale search.
+    function cancelAIRequest() {
+      aiRequestSeq++;
+      if (aiPending && aiWorker) {
+        aiWorker.terminate();
+        aiWorker = null;
+      }
+      aiPending = null;
+    }
 
     /*************************************************************************
      * 3. THREE.JS 3D SCENE, GOTHIC CATHEDRAL & PROCEDURAL MATERIALS
@@ -1905,10 +2036,20 @@
     /*************************************************************************
      * 8. PIECE SYNCHRONIZATION & SHATTER / ATTACK / MOVE ANIMATIONS
      *************************************************************************/
+    // Remove a piece from the scene and free its GPU resources.
+    // Body material is shared across pieces, so only geometries and the per-piece accent clone are disposed.
+    function disposePieceMesh(mesh) {
+      scene.remove(mesh);
+      mesh.traverse(child => {
+        if (child.isMesh && child.geometry) child.geometry.dispose();
+      });
+      if (mesh.userData.accentMat) mesh.userData.accentMat.dispose();
+    }
+
     function syncAllPiecesWithBoard() {
       // Remove existing piece meshes
       for (const mesh of pieceMeshes.values()) {
-        scene.remove(mesh);
+        disposePieceMesh(mesh);
       }
       pieceMeshes.clear();
 
@@ -2102,7 +2243,7 @@
 
             // If Pawn promoted, rebuild mesh into promoted piece type!
             if (move.isPromotion) {
-              scene.remove(attackerMesh);
+              disposePieceMesh(attackerMesh);
               const promotedMesh = buildChessPieceMesh(move.promotionType || 'q', move.piece.color, move.piece.id);
               promotedMesh.position.copy(targetPos);
               scene.add(promotedMesh);
@@ -2162,7 +2303,7 @@
               camState.shakeIntensity = 0.36; // Dynamic camera shake!
 
               if (victimMesh) {
-                scene.remove(victimMesh);
+                disposePieceMesh(victimMesh);
                 pieceMeshes.delete(move.captured.id);
               }
               spawnShatterShards(victimPos || targetPos, move.captured.color, normDir);
@@ -2188,7 +2329,7 @@
             attackerMesh.rotation.y = defaultAngle;
 
             if (move.isPromotion) {
-              scene.remove(attackerMesh);
+              disposePieceMesh(attackerMesh);
               const promotedMesh = buildChessPieceMesh(move.promotionType || 'q', move.piece.color, move.piece.id);
               promotedMesh.position.copy(targetPos);
               scene.add(promotedMesh);
@@ -2299,6 +2440,7 @@
     }
 
     function executePlayerOrAIMove(move, promoType = 'q') {
+      cancelAIRequest();
       const record = chess.makeMove(move, promoType);
       updateUIStatus();
       refreshHighlights();
@@ -2323,11 +2465,8 @@
         // Trigger AI response if vs. AI and it's Black's turn
         if (gameMode === 'ai' && chess.turn === 'b' && !state.over) {
           setTimeout(() => {
-            if (chess.turn !== 'b' || isAnimating) return;
-            const aiMove = chess.findBestMove(2);
-            if (aiMove) {
-              executePlayerOrAIMove(aiMove, 'q');
-            }
+            if (gameMode !== 'ai' || chess.turn !== 'b' || isAnimating) return;
+            requestAIMove(aiMove => executePlayerOrAIMove(aiMove, 'q'));
           }, 360);
         }
       });
@@ -2364,6 +2503,7 @@
 
     function toggleGameMode() {
       if (isAnimating) return;
+      cancelAIRequest();
       gameMode = gameMode === 'ai' ? '2p' : 'ai';
       const btn = document.getElementById('btn-mode');
       const icon = document.getElementById('icon-mode');
@@ -2376,8 +2516,7 @@
         setCameraPreset('white');
         // If switched to AI during Black's turn, let AI move
         if (chess.turn === 'b' && !chess.getGameState().over) {
-          const aiMove = chess.findBestMove(2);
-          if (aiMove) executePlayerOrAIMove(aiMove, 'q');
+          requestAIMove(aiMove => executePlayerOrAIMove(aiMove, 'q'));
         }
       } else {
         icon.textContent = 'group';
@@ -2389,19 +2528,20 @@
     }
 
     function triggerWizardHint() {
-      if (isAnimating || chess.getGameState().over) return;
-      const best = chess.findBestMove(2);
-      if (best) {
+      if (isAnimating || aiPending || chess.getGameState().over) return;
+      if (gameMode === 'ai' && chess.turn === 'b') return;
+      requestAIMove(best => {
         hintSquares = { fromR: best.fromR, fromC: best.fromC, toR: best.toR, toC: best.toC };
         selectedSquare = { r: best.fromR, c: best.fromC };
         validMovesForSelected = chess.getLegalMovesForSquare(best.fromR, best.fromC);
         soundFX.playSelect(true);
         refreshHighlights();
-      }
+      });
     }
 
     function undoLastMove() {
       if (isAnimating || chess.history.length === 0) return;
+      cancelAIRequest();
       hintSquares = null;
       selectedSquare = null;
       validMovesForSelected = [];
@@ -2429,6 +2569,7 @@
 
     function startNewGame() {
       if (isAnimating) return;
+      cancelAIRequest();
       document.getElementById('promotion-modal').classList.add('hidden');
       pendingPromotionMove = null;
       selectedSquare = null;

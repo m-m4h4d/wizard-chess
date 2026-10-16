@@ -910,7 +910,8 @@
       }
 
       // Execute a legal move on the logical board and record undo history
-      makeMove(move, promotionType = 'q') {
+      // annotate=false skips the +/# suffix, which needs a full legal-move pass; the AI search uses it
+      makeMove(move, promotionType = 'q', annotate = true) {
         const snapshot = this.cloneState();
         const movingPiece = { ...this.board[move.fromR][move.fromC] };
 
@@ -984,10 +985,9 @@
           notation = `${pChar}${capChar}${toSq}${promoChar}`;
         }
 
-        const nextMoves = this.getAllLegalMoves(this.turn);
-        const isCheckNow = this.inCheck(this.turn);
-        if (isCheckNow && nextMoves.length === 0) notation += '#';
-        else if (isCheckNow) notation += '+';
+        if (annotate && this.inCheck(this.turn)) {
+          notation += this.getAllLegalMoves(this.turn).length === 0 ? '#' : '+';
+        }
 
         const record = {
           snapshot,
@@ -1059,7 +1059,7 @@
         let bestVal = color === 'w' ? -Infinity : Infinity;
 
         for (const m of legalMoves) {
-          this.makeMove(m, 'q');
+          this.makeMove(m, 'q', false);
           const val = this.minimax(depth - 1, -Infinity, Infinity, this.turn === 'w');
           this.undo();
 
@@ -1093,7 +1093,7 @@
         if (maximizingPlayer) {
           let maxEval = -Infinity;
           for (const m of moves) {
-            this.makeMove(m, 'q');
+            this.makeMove(m, 'q', false);
             const ev = this.minimax(depth - 1, alpha, beta, false);
             this.undo();
             if (ev > maxEval) maxEval = ev;
@@ -1104,7 +1104,7 @@
         } else {
           let minEval = Infinity;
           for (const m of moves) {
-            this.makeMove(m, 'q');
+            this.makeMove(m, 'q', false);
             const ev = this.minimax(depth - 1, alpha, beta, true);
             this.undo();
             if (ev < minEval) minEval = ev;
@@ -1905,10 +1905,20 @@
     /*************************************************************************
      * 8. PIECE SYNCHRONIZATION & SHATTER / ATTACK / MOVE ANIMATIONS
      *************************************************************************/
+    // Remove a piece from the scene and free its GPU resources.
+    // Body material is shared across pieces, so only geometries and the per-piece accent clone are disposed.
+    function disposePieceMesh(mesh) {
+      scene.remove(mesh);
+      mesh.traverse(child => {
+        if (child.isMesh && child.geometry) child.geometry.dispose();
+      });
+      if (mesh.userData.accentMat) mesh.userData.accentMat.dispose();
+    }
+
     function syncAllPiecesWithBoard() {
       // Remove existing piece meshes
       for (const mesh of pieceMeshes.values()) {
-        scene.remove(mesh);
+        disposePieceMesh(mesh);
       }
       pieceMeshes.clear();
 
@@ -2102,7 +2112,7 @@
 
             // If Pawn promoted, rebuild mesh into promoted piece type!
             if (move.isPromotion) {
-              scene.remove(attackerMesh);
+              disposePieceMesh(attackerMesh);
               const promotedMesh = buildChessPieceMesh(move.promotionType || 'q', move.piece.color, move.piece.id);
               promotedMesh.position.copy(targetPos);
               scene.add(promotedMesh);
@@ -2162,7 +2172,7 @@
               camState.shakeIntensity = 0.36; // Dynamic camera shake!
 
               if (victimMesh) {
-                scene.remove(victimMesh);
+                disposePieceMesh(victimMesh);
                 pieceMeshes.delete(move.captured.id);
               }
               spawnShatterShards(victimPos || targetPos, move.captured.color, normDir);
@@ -2188,7 +2198,7 @@
             attackerMesh.rotation.y = defaultAngle;
 
             if (move.isPromotion) {
-              scene.remove(attackerMesh);
+              disposePieceMesh(attackerMesh);
               const promotedMesh = buildChessPieceMesh(move.promotionType || 'q', move.piece.color, move.piece.id);
               promotedMesh.position.copy(targetPos);
               scene.add(promotedMesh);
@@ -2323,7 +2333,7 @@
         // Trigger AI response if vs. AI and it's Black's turn
         if (gameMode === 'ai' && chess.turn === 'b' && !state.over) {
           setTimeout(() => {
-            if (chess.turn !== 'b' || isAnimating) return;
+            if (gameMode !== 'ai' || chess.turn !== 'b' || isAnimating) return;
             const aiMove = chess.findBestMove(2);
             if (aiMove) {
               executePlayerOrAIMove(aiMove, 'q');
